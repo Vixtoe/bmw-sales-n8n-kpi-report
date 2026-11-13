@@ -12,7 +12,9 @@ An n8n workflow that reads a 50,000-record BMW sales dataset from Google Sheets,
 
 ## Sample output
 
-The file [`weekly_summary_sample.html`](weekly_summary_sample.html) is the email body from a test run on the 2010–2024 dataset. It contains:
+The file [`weekly_summary_sample.html`](sample_output/weekly_summary_sample.html) is the email body from a test run on the 2010–2024 dataset. GitHub shows HTML files as source code, so view the rendered report here: [Rendered sample report](https://htmlpreview.github.io/?https://github.com/Vixtoe/bmw-sales-n8n-kpi-report/blob/main/sample_output/weekly_summary_sample.html)
+
+It contains:
 
 - Date range, total revenue ($19,012,242,534,459), and rejected rows (0)
 - Three insights, each traced to a single Region + Year row
