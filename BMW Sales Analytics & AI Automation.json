@@ -1,0 +1,348 @@
+{
+  "name": "BMW Sales Analytics & AI Automation",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "a1059596-1553-491a-b158-4c080b49af8c",
+      "name": "Manual Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        208,
+        272
+      ]
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "1vVG7qlUC6ytZiE3cxbmAuNH0tld4PrbOAypOtw72FLs",
+          "mode": "list",
+          "cachedResultName": "bmw_digital_sales_2010_2024",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1vVG7qlUC6ytZiE3cxbmAuNH0tld4PrbOAypOtw72FLs/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 320588995,
+          "mode": "list",
+          "cachedResultName": "bmw_digital_sales_2010_2024.csv",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1vVG7qlUC6ytZiE3cxbmAuNH0tld4PrbOAypOtw72FLs/edit#gid=320588995"
+        },
+        "options": {}
+      },
+      "id": "b7d8facf-2820-4b74-8cea-3dc061b27f4b",
+      "name": "Get row(s) in sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        496,
+        224
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "1VyxwBwU0q6x0YdJ",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst validRows = [];\nconst rejectedRows = [];\n\nfor (const item of items) {\n  const data = item.json;\n  if (!data.Vehicle_Model || !data.Year || !data.Region || typeof data.Total_Revenue !== 'number') {\n    rejectedRows.push(item);\n  } else {\n    validRows.push(item);\n  }\n}\n\nreturn validRows;"
+      },
+      "id": "b2e98bbf-5887-4a75-bd8c-e587827c5b0c",
+      "name": "Validate Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        656,
+        352
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst aggregates = {};\n\nfor (const item of items) {\n  const { Region, Year, Sales_Volume, Total_Revenue: Revenue, Price_USD } = item.json;\n  const key = `${Region}_${Year}`;\n  \n  if (!aggregates[key]) {\n    aggregates[key] = { Region, Year, total_revenue: 0, total_units: 0, avg_price_sum: 0, count: 0 };\n  }\n  \n  aggregates[key].total_revenue += Revenue || 0;\n  aggregates[key].total_units += Sales_Volume || 0;\n  aggregates[key].avg_price_sum += Price_USD || 0;\n  aggregates[key].count += 1;\n}\n\nconst kpiTable = Object.values(aggregates).map(agg => ({\n  Region: agg.Region,\n  Year: agg.Year,\n  total_revenue: agg.total_revenue,\n  total_units: agg.total_units,\n  average_price: agg.count > 0 ? agg.avg_price_sum / agg.count : 0\n}));\n\nconst total_revenue = kpiTable.reduce((s, r) => s + r.total_revenue, 0);\nconst years = kpiTable.map(r => Number(r.Year)).filter(y => !isNaN(y));\nconst date_range = years.length ? Math.min(...years) + '-' + Math.max(...years) : 'n/a';\nconst rejected_rows = $('Get row(s) in sheet').all().length - items.length;\n\nconst byRev = kpiTable.slice().sort((a, b) => b.total_revenue - a.total_revenue);\nconst byPrice = kpiTable.slice().sort((a, b) => b.average_price - a.average_price);\nconst mk = (r, metric) => r ? { metric, region_or_year: r.Region + ' ' + r.Year, value: r[metric], source_row_reference: r.Region + ' + ' + r.Year } : null;\nconst picks = [mk(byRev[0], 'total_revenue'), mk(byRev[byRev.length - 1], 'total_revenue'), mk(byPrice[0], 'average_price')];\n\nreturn [{ json: { kpiTable, total_revenue, rejected_rows, date_range, picks } }];"
+      },
+      "id": "ae285eb0-84fa-4e13-b863-156403d81947",
+      "name": "Aggregate KPI Table",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        864,
+        272
+      ]
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "value": "gpt-4o-mini",
+          "mode": "list",
+          "cachedResultName": "GPT-4O-MINI"
+        },
+        "messages": {
+          "values": [
+            {
+              "content": "You are a strict financial data analyst. You report only numbers that appear in the KPI table you are given.\n\nOutput rules:\n- Respond with a single JSON object and nothing else.\n- Your response must start with \"{\" and end with \"}\".\n- No markdown, no code fences, no preamble, no explanation.\n- Follow the schema in the user message exactly. Do not add or remove keys.\n\nData rules:\n- Every \"value\" and \"rationale_value\" must be copied exactly from a number in the KPI table. Do not calculate, estimate, average, round, convert, or infer any number.\n- Every \"region_or_year\" and \"target_region\" / \"target_year\" must match a Region or Year value that exists in the KPI table.\n- If the KPI table cannot support an insight, set \"metric\" to \"insufficient data\" and \"value\" to null.\n- Never use generic advice such as \"increase marketing\" or \"improve sales\". Each insight and the recommended action must refer to a specific region, year, and number from the table.",
+              "role": "system"
+            },
+            {
+              "content": "=KPI table (JSON array, one object per Region + Year row):\n{{ JSON.stringify($json.kpiTable) }}\n\nSummary facts (copy these exactly, do not recalculate):\n- total_revenue: {{ $json.total_revenue }}\n- rejected_rows: {{ $json.rejected_rows }}\n- date_range: {{ $json.date_range }}\n\nPre-computed picks (authoritative, already checked against the KPI table; use these exactly):\n{{ JSON.stringify($json.picks) }}\n\nTask: Produce exactly three insights and one recommended action using the picks above.\n1. Insight 1: picks[0], the row with the highest total_revenue.\n2. Insight 2: picks[1], the row with the lowest total_revenue.\n3. Insight 3: picks[2], the row with the highest average_price.\nCopy metric, region_or_year, value and source_row_reference from each pick unchanged.\n\nEach insight must come from a different row (the picks above already satisfy this; if two picks are ever the same row, choose the next-best row for the later insight and say so in source_row_reference).\n\nRecommended action: base it on Insight 1 only. Set target_region and target_year from that row, metric to \"total_revenue\", and rationale_value to that row's total_revenue. Write \"action\" as a specific, testable next step for an analyst, phrased as something to investigate, for example: \"Check whether the [Region] [Year] peak held in the following years by comparing its total_revenue with the same region's totals for adjacent years.\" Do not recommend marketing or pricing changes unless the table itself shows the cause.\n\nReturn ONLY this JSON, filled in:\n{\n  \"date_range\": \"{{ $json.date_range }}\",\n  \"total_revenue\": {{ $json.total_revenue }},\n  \"rejected_rows\": {{ $json.rejected_rows }},\n  \"insights\": [\n    {\"metric\": \"total_revenue\", \"region_or_year\": \"Region Year\", \"value\": 0, \"source_row_reference\": \"Region + Year\"},\n    {\"metric\": \"total_revenue\", \"region_or_year\": \"Region Year\", \"value\": 0, \"source_row_reference\": \"Region + Year\"},\n    {\"metric\": \"average_price\", \"region_or_year\": \"Region Year\", \"value\": 0, \"source_row_reference\": \"Region + Year\"}\n  ],\n  \"recommended_action\": {\"target_region\": \"string\", \"target_year\": \"string\", \"metric\": \"total_revenue\", \"rationale_value\": 0, \"action\": \"string\"}\n}\n\nRules:\n- Every number must be copied exactly from the KPI table or the summary facts above.\n- Do not round, convert, or calculate new numbers.\n- \"average_price\" is a simple average of listed prices, not revenue-weighted.\n- If the KPI table has fewer than three rows, set the missing insight's \"metric\" to \"insufficient data\" and \"value\" to null.\n- Do not add any text outside the JSON."
+            }
+          ]
+        },
+        "jsonOutput": true,
+        "options": {}
+      },
+      "id": "09833cb0-668a-4099-b2cf-c83b28788ff5",
+      "name": "AI Summary LLM",
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1.4,
+      "position": [
+        1088,
+        272
+      ],
+      "credentials": {
+        "openAiApi": {
+          "id": null,
+          "name": "",
+          "__aiGatewayManaged": true
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = $input.first();\nlet output;\ntry {\n  output = typeof (item.json.message && item.json.message.content) === 'string' ? JSON.parse(item.json.message.content) : item.json.message.content;\n} catch (e) {\n  output = {\n    date_range: \"n/a\", total_revenue: null, rejected_rows: null,\n    insights: [{ metric: \"insufficient data\", value: null, region_or_year: \"n/a\" }],\n    recommended_action: { target_region: \"n/a\", target_year: \"n/a\", metric: \"insufficient data\", rationale_value: null, action: \"insufficient data\" }\n  };\n}\nreturn [{ json: output }];"
+      },
+      "id": "92c3c70f-c712-4f1d-8304-a63bebf7c014",
+      "name": "Parse & Fallback",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1312,
+        272
+      ]
+    },
+    {
+      "parameters": {
+        "sendTo": "tannchanoudom@gmail.com",
+        "subject": "Weekly BMW Sales Business Summary",
+        "message": "={{ $json.html }}",
+        "options": {}
+      },
+      "id": "46a9ea17-506f-4dbc-b0ca-7fa9528cb030",
+      "name": "Send Gmail",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        1856,
+        560
+      ],
+      "webhookId": "cbc4bedf-2488-4ba2-be5e-0fd62c12daa3",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "dSqe2isXxUX6Vn90",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "1LWQpcxmTYSHqMIXQUCNJyiPNwOhyGddDcDtC73HUjfQ",
+          "mode": "list",
+          "cachedResultName": "BMW Weekly Sales Log"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 1267306300,
+          "mode": "list",
+          "cachedResultName": "Log"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "schema": [
+            {
+              "id": "Date",
+              "displayName": "Date",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Total Revenue",
+              "displayName": "Total Revenue",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "value": {
+            "Date": "={{ $now.toFormat('yyyy-MM-dd') }}",
+            "Total Revenue": "={{ $('Aggregate KPI Table').item.json.kpiTable.reduce((sum, r) => sum + r.total_revenue, 0) }}"
+          }
+        },
+        "options": {}
+      },
+      "id": "2647079d-1d89-4ce8-85b9-881f1dbc21d3",
+      "name": "Google Sheets Log",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        1536,
+        400
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "1VyxwBwU0q6x0YdJ",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "weeks"
+            }
+          ]
+        }
+      },
+      "id": "9c570bae-d161-48d0-9589-76de69109872",
+      "name": "Schedule Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        208,
+        464
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Mode: Run Once for All Items\nconst item = $input.first();\nconst d = item ? item.json : {};\n\nlet kpiTable = Array.isArray(d.kpiTable) ? d.kpiTable : [];\nif (kpiTable.length === 0) {\n  try {\n    kpiTable = $('Aggregate KPI Table').first().json.kpiTable || [];\n  } catch (e) {\n    kpiTable = [];\n  }\n}\n\nconst esc = s => String(s === undefined || s === null ? '' : s)\n  .replace(/&/g, '&amp;').replace(/</g, '&lt;')\n  .replace(/>/g, '&gt;').replace(/\"/g, '&quot;');\n\nconst isNum = n => typeof n === 'number' && isFinite(n);\n\nfunction commas(n, dec) {\n  const fixed = Number(n).toFixed(dec);\n  const parts = fixed.split('.');\n  parts[0] = parts[0].replace(/\\B(?=(\\d{3})+(?!\\d))/g, ',');\n  return parts.join('.');\n}\n\nconst num = (n, dec = 0) => isNum(n) ? commas(n, dec) : 'n/a';\nconst usd = (n, dec = 0) => isNum(n) ? '$' + commas(n, dec) : 'n/a';\n\nconst labels = {\n  total_revenue: 'Total revenue',\n  average_price: 'Average listed price'\n};\nconst label = m => labels[m] || esc(m || 'metric');\nconst fmt = (metric, n) => metric === 'average_price' ? usd(n, 2) : usd(n);\n\nconst rows = kpiTable\n  .map(r => ({ ...r, Year: Number(r.Year) }))\n  .sort((a, b) => String(a.Region).localeCompare(String(b.Region)) || a.Year - b.Year);\n\nconst years = rows.map(r => r.Year).filter(y => isFinite(y));\nconst dateRange = years.length ? Math.min(...years) + '–' + Math.max(...years) : 'n/a';\n\nconst kpiRows = rows.map(r =>\n  '<tr><td>' + esc(r.Region) + '</td><td>' + esc(r.Year) + '</td>' +\n  '<td align=\"right\">' + usd(r.total_revenue) + '</td>' +\n  '<td align=\"right\">' + num(r.total_units) + '</td>' +\n  '<td align=\"right\">' + usd(r.average_price, 2) + '</td></tr>'\n).join('\\n');\n\nconst insights = (Array.isArray(d.insights) ? d.insights : []).map(i =>\n  '<li><b>' + esc(label(i.metric)) + '</b>: ' + esc(i.region_or_year) +\n  ' — ' + (i.value === null || i.value === undefined ? 'n/a' : fmt(i.metric, i.value)) +\n  (i.source_row_reference ? ' <i>(' + esc(i.source_row_reference) + ')</i>' : '') +\n  '</li>'\n).join('\\n');\n\nconst ra = d.recommended_action || {};\n\nconst action = String(ra.action || 'No action generated.').replace(/_/g, ' ');\n\nconst html =\n'<h2>Weekly BMW Sales Business Summary</h2>\\n' +\n'<p><b>Date range:</b> ' + esc(dateRange) + '<br>' +\n'<b>Total revenue:</b> ' + usd(d.total_revenue) + '<br>' +\n'<b>Rejected rows:</b> ' + num(d.rejected_rows) + '</p>\\n' +\n'<h3>Key insights</h3>\\n<ul>\\n' + insights + '\\n</ul>\\n' +\n'<h3>Recommended action</h3>\\n' +\n'<p>' + esc(action) + '</p>\\n' +\n'<p><b>Target:</b> ' + esc(ra.target_region) + ' ' + esc(ra.target_year) +\n' &nbsp;|&nbsp; <b>' + esc(label(ra.metric)) + ':</b> ' + fmt(ra.metric, ra.rationale_value) + '</p>\\n' +\n'<h3>KPI table (Region + Year)</h3>\\n' +\n'<table border=\"1\" cellpadding=\"5\" style=\"border-collapse:collapse;font-size:13px;\">\\n' +\n'<tr><th>Region</th><th>Year</th><th>Total revenue</th><th>Total units</th><th>Average listed price</th></tr>\\n' +\n(kpiRows || '<tr><td colspan=\"5\">No KPI rows received. Check that Build Email is connected to Parse &amp; Fallback.</td></tr>') +\n'\\n</table>';\n\nreturn [{ json: { html, kpi_row_count: rows.length } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1488,
+        624
+      ],
+      "id": "f6f0ed25-b0db-4bc3-aecd-7b97d8f20546",
+      "name": "Code in JavaScript"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Manual Trigger": {
+      "main": [
+        [
+          {
+            "node": "Get row(s) in sheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get row(s) in sheet": {
+      "main": [
+        [
+          {
+            "node": "Validate Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate Data": {
+      "main": [
+        [
+          {
+            "node": "Aggregate KPI Table",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aggregate KPI Table": {
+      "main": [
+        [
+          {
+            "node": "AI Summary LLM",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Summary LLM": {
+      "main": [
+        [
+          {
+            "node": "Parse & Fallback",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse & Fallback": {
+      "main": [
+        [
+          {
+            "node": "Google Sheets Log",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Code in JavaScript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "Get row(s) in sheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript": {
+      "main": [
+        [
+          {
+            "node": "Send Gmail",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "ad96c587-3eac-4e31-bc06-26e21b5fc8d4",
+  "meta": {
+    "instanceId": "a7651d96114ff4699576724119f11c78583307df39efe90e7bfcbea8074606d4"
+  },
+  "nodeGroups": [],
+  "id": "JzmjDmXihUzAxcyB",
+  "tags": []
+}
