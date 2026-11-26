@@ -57,7 +57,7 @@ Parse & Fallback → Google Sheets Log (History tab, one row per run)
 - Each record's `Total_Revenue` equals `Price_USD × Sales_Volume`.
 - Highest-revenue row: Europe 2022 ($235,580,072,926). Lowest: North America 2012 ($180,204,716,918). Highest average listed price: North America 2015 ($77,465.06).
 
-Total revenue is the sum of batch revenue in this dataset. It is not BMW's reported revenue, and it isn't comparable to the figures in the [Power BI dashboard repo](https://github.com/Vixtoe/bmw-global-sales-dashboard] which uses different aggregations.
+Total revenue is the sum of batch revenue in this dataset. It is not BMW's reported revenue, and it isn't comparable to the figures in the [Power BI dashboard repo](https://github.com/Vixtoe/bmw-global-sales-dashboard) which uses different aggregations.
 
 ## Setup
 
